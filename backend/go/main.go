@@ -28,6 +28,11 @@ func main() {
 
 	/* REST API endpoints */
 	router.GET("/", REST.PingController.Ping)
+	router.GET("/todos", REST.TodoController.GetAllTodoList)
+	router.GET("/todos/:list-id", REST.TodoController.GetOneTodoList)
+	router.GET("/todos/:list-id/:item-id", REST.TodoController.GetOneTodoItem)
+	router.POST("/todos", REST.TodoController.AddOneTodoList)
+	router.POST("/todos/:list-id", REST.TodoController.AddOneTodoItem)
 
 	err = router.Run("localhost:" + strconv.Itoa(port))
 	if err != nil {
