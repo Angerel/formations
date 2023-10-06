@@ -4,6 +4,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	REST "go-api/controllers/rest"
+	WS "go-api/controllers/websocket"
 	"strconv"
 )
 
@@ -33,6 +34,9 @@ func main() {
 	router.GET("/todos/:list-id/:item-id", REST.TodoController.GetOneTodoItem)
 	router.POST("/todos", REST.TodoController.AddOneTodoList)
 	router.POST("/todos/:list-id", REST.TodoController.AddOneTodoItem)
+
+	/* WS Endpoint */
+	router.GET("/ws/live-chat", WS.ChatController.JoinChat)
 
 	err = router.Run("localhost:" + strconv.Itoa(port))
 	if err != nil {
