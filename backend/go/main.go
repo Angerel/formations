@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	REST "go-api/controllers/rest"
@@ -10,15 +11,17 @@ import (
 
 func main() {
 	// Default allowed origins and proxies
-	allowedOrigins := []string{"http://localhost:4200"}
+	allowedProxies := []string{"127.0.0.1"}
+	allowedOrigins := []string{"http://127.0.0.1:4200"}
 	// Port of execution
 	port := 8080
 
 	/* Initializing Gin router and proxy policy */
 	router := gin.Default()
 	router.ForwardedByClientIP = true
-	err := router.SetTrustedProxies(allowedOrigins)
+	err := router.SetTrustedProxies(allowedProxies)
 	if err != nil {
+		fmt.Printf("An unexpected error occurred : %+v\n", err)
 		return
 	}
 
@@ -40,6 +43,7 @@ func main() {
 
 	err = router.Run("localhost:" + strconv.Itoa(port))
 	if err != nil {
+		fmt.Printf("An unexpected error occurred : %+v\n", err)
 		return
 	}
 }
