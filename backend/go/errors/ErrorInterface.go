@@ -15,6 +15,10 @@ func Exception(status int, message string) *ErrorInterface {
 	}
 }
 
+func BadRequestException(message string) *ErrorInterface {
+	return Exception(400, message)
+}
+
 func NotFoundException(message string) *ErrorInterface {
 	return Exception(404, message)
 }
