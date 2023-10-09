@@ -33,6 +33,9 @@ func (instance *UserRepositoryStruct) FindByName(userName string) (*models.Conne
 }
 
 func (instance *UserRepositoryStruct) FindByConnection(userConnection *websocket.Conn) (*models.ConnectedUser, *errors.ErrorInterface) {
+	if userConnection == nil {
+		return nil, errors.BadRequestException("Requested connection cannot be nil.")
+	}
 	for _, user := range instance.Registered {
 		if user.Connection == userConnection {
 			return user, nil
@@ -55,6 +58,9 @@ func (instance *UserRepositoryStruct) CreateOne(user *models.ConnectedUser) (*mo
 }
 
 func (instance *UserRepositoryStruct) LinkConnection(userId string, connection *websocket.Conn) (*models.ConnectedUser, *errors.ErrorInterface) {
+	if userId == "-1" {
+		return nil, errors.BadRequestException("Requested ID is reserved for anonymous purposes.")
+	}
 	var user, err = instance.FindById(userId)
 	if err != nil {
 		return nil, err
@@ -64,6 +70,9 @@ func (instance *UserRepositoryStruct) LinkConnection(userId string, connection *
 }
 
 func (instance *UserRepositoryStruct) UnLinkConnection(userId string) (*models.ConnectedUser, *errors.ErrorInterface) {
+	if userId == "-1" {
+		return nil, errors.BadRequestException("Requested ID is reserved for anonymous purposes.")
+	}
 	var user, err = instance.FindById(userId)
 	if err != nil {
 		return nil, err
@@ -74,5 +83,13 @@ func (instance *UserRepositoryStruct) UnLinkConnection(userId string) (*models.C
 
 // UserRepository - Initializes the repository's data store
 var UserRepository = UserRepositoryStruct{
-	[]*models.ConnectedUser{},
+	[]*models.ConnectedUser{
+		{
+			User: models.User{
+				Id:   "-1",
+				Name: "Anonymous",
+			},
+			Connection: nil,
+		},
+	},
 }
