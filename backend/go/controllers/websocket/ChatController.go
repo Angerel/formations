@@ -59,6 +59,7 @@ func (instance ChatControllerStruct) JoinChat(c *gin.Context) {
 		//Receives message
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
+			fmt.Printf("Encountered error : %+v\n", err)
 			break
 		}
 
@@ -68,8 +69,9 @@ func (instance ChatControllerStruct) JoinChat(c *gin.Context) {
 		decoded.Sender = conn
 
 		//Handles the message
-		err = handleNewMessage(decoded)
-		if err != nil {
+		err2 := handleNewMessage(decoded)
+		if err2 != nil {
+			fmt.Printf("Encountered error : %+v\n", err2)
 			break
 		}
 	}
@@ -107,7 +109,6 @@ func getHistory(sender *websocket.Conn) *errors.ErrorInterface {
 }
 
 func postMessage(sender *websocket.Conn, options string) *errors.ErrorInterface {
-
 	/* Decode options as a message */
 	var decodedOptions struct {
 		Message string `json:"message"`
