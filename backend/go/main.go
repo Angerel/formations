@@ -12,7 +12,7 @@ import (
 func main() {
 	// Default allowed origins and proxies
 	allowedProxies := []string{"127.0.0.1"}
-	allowedOrigins := []string{"http://127.0.0.1:4200"}
+	allowedOrigins := []string{"http://127.0.0.1:5173", "http://localhost:5173"}
 	// Port of execution
 	port := 8080
 
