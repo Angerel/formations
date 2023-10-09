@@ -1,9 +1,11 @@
 package WS
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"go-api/errors"
 	"go-api/models"
 	"go-api/services"
 	"net/http"
@@ -12,11 +14,11 @@ import (
 )
 
 type ChatControllerStruct struct {
-	NextId   int                `json:"nextId"`
-	Upgrader websocket.Upgrader `json:"upgrader"`
+	NextUserId int                `json:"nextUserId"`
+	Upgrader   websocket.Upgrader `json:"upgrader"`
 }
 
-func HandleConnectionClosure(code int, text string, conn *websocket.Conn) error {
+func HandleConnectionClosure(conn *websocket.Conn) error {
 	usr, err := services.UserService.FindByConnection(conn)
 	if err != nil {
 		return err
@@ -28,9 +30,10 @@ func HandleConnectionClosure(code int, text string, conn *websocket.Conn) error 
 	return nil
 }
 
-/* JoinChat - Live chat websocket entrypoint
+// JoinChat
+/* Live chat websocket entrypoint
  * Requests all live users and messages, then upgrades websocket connection
- * Reads the first message received as the user name
+ * Reads the first message received as the username
  * Writes the first message as a message history along with the user's identifier
  * Then registers every message received in the database and broadcasts them to all the listeners
  *
@@ -38,30 +41,9 @@ func HandleConnectionClosure(code int, text string, conn *websocket.Conn) error 
  * @uses UserService
  */
 func (instance ChatControllerStruct) JoinChat(c *gin.Context) {
-	/* Variables initialisation */
-	//error variable
-	var err error
-
-	//websocket variables
-	var w = c.Writer
-	var r = c.Request
-
-	//User list
-	users, err := services.UserService.FindAll()
-	if err != nil {
-		fmt.Printf("Failed to get users : %+v\n", err)
-		return
-	}
-
-	//Message list
-	messages, err := services.MessageService.FindAll()
-	if err != nil {
-		fmt.Printf("Failed to get message history : %+v\n", err)
-		return
-	}
 
 	/* Upgrades connection from REST to WebSocket */
-	conn, err := instance.Upgrader.Upgrade(w, r, nil)
+	conn, err := instance.Upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		fmt.Printf("Failed to set websocket upgrade: %+v\n", err)
 		return
@@ -69,74 +51,147 @@ func (instance ChatControllerStruct) JoinChat(c *gin.Context) {
 
 	/* Sets how a closed connection should be handled */
 	conn.SetCloseHandler(func(code int, text string) error {
-		return HandleConnectionClosure(code, text, conn)
+		return HandleConnectionClosure(conn)
 	})
 
-	/* First message policy : Reads the user's name first */
-	_, msg, err := conn.ReadMessage()
-	if err != nil {
-		return
-	}
-	var username = string(msg)
-
-	/* Finds the user in the database
-	 * If it exists, links the connection object to the user
-	 * Else, creates a new user with the connection object attached
-	 */
-	currentUser, err := services.UserService.FindByName(username)
-	if currentUser == nil {
-		currentUser = &models.ConnectedUser{
-			User: models.User{
-				Id:   strconv.Itoa(instance.NextId),
-				Name: username,
-			},
-			Connection: conn,
-		}
-		instance.NextId++
-		*users = append(*users, currentUser)
-	} else {
-		currentUser.Connection = conn
-	}
-
-	/* Then, sends the message history to the user, along with its identifier for its own recognition */
-	conn.WriteJSON(models.FirstMessage{
-		History: *messages,
-		UserId:  currentUser.User.Id,
-	})
-
-	/* Finally, starts a loop of receiving messages and broadcasting them to all the listeners */
+	/* Finally, starts a loop of receiving orders and treating them */
 	for {
-		//Receives message content
+		//Receives message
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			break
 		}
 
-		//Formats it into a complete object with id, author and timestamp
-		var newMsg = models.Message{
-			Id:        strconv.Itoa(len(*messages)),
-			Message:   string(msg),
-			Timestamp: strconv.FormatInt(time.Now().Unix(), 10),
-			User:      currentUser.User,
+		//Decode message content and attributes current connection as sender
+		var decoded models.ReceivedMessage
+		_ = json.Unmarshal(msg, &decoded)
+		decoded.Sender = conn
+
+		//Handles the message
+		err = handleNewMessage(decoded)
+		if err != nil {
+			break
 		}
+	}
+	_ = conn.Close()
+}
 
-		//Pushes the new message into the database
-		services.MessageService.CreateOne(&newMsg)
-
-		//Broadcasts it to all live connections
-		broadcastJson(newMsg, *users)
+func handleNewMessage(msg models.ReceivedMessage) *errors.ErrorInterface {
+	switch msg.Action {
+	case "getHistory":
+		return getHistory(msg.Sender)
+	case "postMessage":
+		return postMessage(msg.Sender, msg.Options)
+	case "authenticate":
+		return authenticate(msg.Sender, msg.Options)
+	default:
+		return errors.BadRequestException("Bad request")
 	}
 }
 
+func getHistory(sender *websocket.Conn) *errors.ErrorInterface {
+	messages, err := services.MessageService.FindAll()
+	if err != nil {
+		return err
+	}
+	messagesJson, _ := json.Marshal(messages)
+	messagesJsonStr := string(messagesJson)
+
+	user, err := services.UserService.FindByConnection(sender)
+	if err != nil {
+		return err
+	}
+
+	sendJsonTo(messagesJsonStr, user)
+	return nil
+}
+
+func postMessage(sender *websocket.Conn, options string) *errors.ErrorInterface {
+
+	/* Decode options as a message */
+	var decodedOptions struct {
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal([]byte(options), &decodedOptions)
+
+	/* Get sender, or anonymous if sender is not registered */
+	user, _ := services.UserService.FindByConnection(sender)
+	if user == nil {
+		user, _ = services.UserService.FindByName("Anonymous")
+		if user == nil {
+			return errors.InternalException("Something wrong happened")
+		}
+	}
+
+	/* Get current history to find next id */
+	messages, err := services.MessageService.FindAll()
+	if err != nil {
+		return err
+	}
+
+	/* Create new Message object with message content, next identifier, current time and sender */
+	var newMsg = models.Message{
+		Id:        strconv.Itoa(len(*messages)),
+		Message:   decodedOptions.Message,
+		Timestamp: strconv.FormatInt(time.Now().Unix(), 10),
+		User:      &user.User,
+	}
+
+	/* Save the message in DB and return it */
+	created, err := services.MessageService.CreateOne(&newMsg)
+	if err != nil {
+		return err
+	}
+
+	users, err := services.UserService.FindAll()
+	if err != nil {
+		return err
+	}
+
+	broadcastJson(created, *users)
+	return nil
+}
+
+func authenticate(sender *websocket.Conn, options string) *errors.ErrorInterface {
+	/* Decode options as username */
+	var decodedOptions struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal([]byte(options), &decodedOptions)
+
+	/* Find or create the user with the decoded username */
+	currentUser, _ := services.UserService.FindByName(decodedOptions.Name)
+	if currentUser == nil {
+		currentUser = &models.ConnectedUser{
+			User: models.User{
+				Id:   strconv.Itoa(ChatController.NextUserId),
+				Name: decodedOptions.Name,
+			},
+			Connection: sender,
+		}
+		ChatController.NextUserId++
+		if _, err := services.UserService.CreateOne(currentUser); err != nil {
+			return err
+		}
+	} else {
+		if _, err := services.UserService.LinkConnection(currentUser.User.Id, sender); err != nil {
+			return err
+		}
+	}
+
+	/* Return nothing as it went well */
+	return nil
+}
+
 /* Sends any content to a user if it is listening to the websocket */
-func sendJsonTo(message interface{}, user *models.ConnectedUser) {
+func sendJsonTo(message any, user *models.ConnectedUser) {
 	if user.Connection != nil {
-		user.Connection.WriteJSON(message)
+		_ = user.Connection.WriteJSON(message)
 	}
 }
 
 /* Sends any content to a list of users */
-func broadcastJson(message interface{}, receivers []*models.ConnectedUser) {
+func broadcastJson(message any, receivers []*models.ConnectedUser) {
 	for _, user := range receivers {
 		sendJsonTo(message, user)
 	}
@@ -150,5 +205,5 @@ var ChatController = ChatControllerStruct{
 			return true
 		},
 	},
-	NextId: 0,
+	NextUserId: 0,
 }
